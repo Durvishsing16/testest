@@ -1,0 +1,155 @@
+# Create the cheat sheet file
+cat > memory_forensics_cheat_sheet.txt << 'EOF'
+# MEMORY FORENSICS EXAM CHEAT SHEET
+
+## QUICK START - First 2 Minutes
+volatility --profile=XXX linux_psaux > psaux.txt
+volatility --profile=XXX linux_netstat > netstat.txt
+volatility --profile=XXX linux_check_syscall > syscall.txt
+
+## 1. PROCESS ANALYSIS
+
+### Essential Plugins:
+linux_psaux    # Arguments (WHAT)
+linux_psenv    # Environment (HOW) 
+linux_pstree   # Relationships (WHEN)
+linux_bash     # Command history
+
+### Critical Greps:
+grep -E "/tmp/|base64|nc |\.sh|wget|curl" psaux.txt
+grep -E "LD_PRELOAD|SECRET|KEY|PASSWORD" psenv.txt
+grep -E "apache2.*bash|www-data.*sh" pstree.txt
+
+### Extract Suspicious PIDs:
+grep "/tmp/" psaux.txt | awk '{print $1}' > suspicious_pids.txt
+
+## 2. NETWORK ANALYSIS
+
+### Essential Plugin:
+linux_netstat    # All network connections
+
+### Critical Findings:
+grep -E ":4444|:1337|:31337" netstat.txt
+grep "ESTABLISHED" netstat.txt | grep -E "bash|sh|python"
+grep "LISTEN" netstat.txt | grep "\[unknown\]"
+grep -f suspicious_pids.txt netstat.txt
+
+### Quick Analysis:
+# Suspicious listeners:
+grep "LISTEN" netstat.txt | awk '$4 ~ /:1337|:4444|:31337/'
+
+# Reverse shells:
+grep "ESTABLISHED" netstat.txt | awk -F: '$NF < 1000'
+
+# C2 infrastructure:
+awk '/ESTABLISHED/ {print $3}' netstat.txt | awk -F: '{print $1}' | sort | uniq -c | sort -nr
+
+## 3. INTRUSION DETECTION
+
+### Essential Plugins:
+linux_check_syscall    # System call hooks
+linux_check_modules    # Hidden modules  
+linux_lsmod            # Loaded modules baseline
+
+### Critical Findings:
+grep "HOOKED" syscall.txt
+diff <(awk '{print $1}' lsmod.txt) <(awk '{print $1}' modules.txt)
+grep -f suspicious_pids.txt syscall.txt
+
+## CORRELATION COMMANDS
+
+### Build Attack Story:
+PID=$(grep "/tmp/malware" psaux.txt | awk '{print $1}')
+grep "$PID" netstat.txt
+grep "$PID" syscall.txt
+grep "^$PID" psenv.txt
+
+### One-Liner Investigation:
+pid=1337; echo "=== PID $pid ==="; grep "^$pid" psaux.txt; grep "$pid" netstat.txt; grep "$pid" syscall.txt; grep "^$pid" psenv.txt
+
+## TIME MANAGEMENT (15-Minute Exam)
+
+### 0-2 min: Run core plugins
+volatility --profile=XXX linux_psaux > psaux.txt
+volatility --profile=XXX linux_netstat > netstat.txt
+volatility --profile=XXX linux_check_syscall > syscall.txt
+
+### 2-5 min: Quick analysis
+grep -E "/tmp/|base64|nc " psaux.txt
+grep -E ":4444|:1337" netstat.txt
+grep "HOOKED" syscall.txt
+
+### 5-10 min: Correlate findings
+grep -f suspicious_pids.txt netstat.txt
+grep "HOOKED" syscall.txt | awk '{print $2}' | xargs -I {} grep {} psaux.txt
+
+### 10-15 min: Write answers
+
+## ANSWER TEMPLATE
+
+### For Each Finding:
+1. [TYPE] ANALYSIS:
+   - Command: volatility linux_psaux | grep "suspicious"
+   - Evidence: PID 1337: /tmp/malware.sh
+   - Network: Connected to 10.0.2.2:4444
+   - Hooks: sys_read HOOKED:UNKNOWN
+   - Interpretation: Malware with C2 and rootkit
+   - Severity: CRITICAL
+
+## PRO TIPS
+
+### Process Analysis:
+- Ignore kernel threads [kworker]
+- Focus on /tmp/, /dev/shm/ processes
+- LD_PRELOAD = definite compromise
+- Recent bash history > old entries
+
+### Network Analysis:
+- Port 4444 = Metasploit, 1337 = Backdoor, 31337 = Rootkit
+- bash/sh with network = Reverse shell
+- Multiple connections to same IP = C2
+
+### Intrusion Detection:
+- ANY "HOOKED" = Rootkit present
+- Hidden modules = Kernel-level compromise
+- Cross-reference hooked PIDs with network
+
+### Exam Strategy:
+- Copy-paste commands to save time
+- Redirect all output to files
+- Correlate across multiple plugins
+- Time box each question
+
+## SEVERITY ASSESSMENT
+
+### CRITICAL (Immediate evidence):
+- Reverse shells
+- System call hooks
+- Hidden kernel modules
+- LD_PRELOAD injection
+
+### HIGH (Strong evidence):
+- Unknown listening ports
+- Processes from /tmp/ with network
+- Suspicious bash history
+
+### MEDIUM (Correlation needed):
+- Single unusual process
+- Single unusual connection
+
+Remember: Three MEDIUM findings from different plugins = HIGH severity!
+
+## QUICK REFERENCE
+
+### Most Important Greps:
+grep -E "/tmp/|base64|nc " psaux.txt
+grep -E ":4444|:1337" netstat.txt  
+grep "HOOKED" syscall.txt
+grep "LD_PRELOAD" psenv.txt
+
+### Common Normal Processes (don't flag):
+- [kworker], [kthreadd] = kernel threads
+- dhclient with raw sockets = normal
+- getty, sshd, apache2 = system services
+
+EOF
